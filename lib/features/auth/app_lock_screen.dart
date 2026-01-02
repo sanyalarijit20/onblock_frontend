@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'dart:convert';
 import '../../core/auth/biometric_service.dart';
-import '../../core/auth/secure_storage.dart';
 import '/core/auth/auth_repository.dart';
+import '/theme/app_theme.dart';
+import '../../utils/validators.dart';
+
+enum AuthMode { biometric, face, passkey }
 
 class AppLockScreen extends StatefulWidget {
   const AppLockScreen({super.key});
@@ -15,32 +18,45 @@ class AppLockScreen extends StatefulWidget {
 class _AppLockScreenState extends State<AppLockScreen> {
   final _bioService = BiometricService();
   final _authRepo = AuthRepository();
-  final _storage = SecureStorage();
+  final _passkeyController = TextEditingController();
+  final _formKey = GlobalKey<FormState>(); 
   
-  bool _useFaceAuth = false;
+  AuthMode _currentMode = AuthMode.biometric;
   CameraController? _cameraController;
   bool _isVerifying = false;
 
   @override
   void initState() {
     super.initState();
-    // Auto-trigger native biometrics (Fingerprint/PIN) on entry
+    // Start with Fingerprint prompt automatically
     _triggerNativeAuth();
   }
 
+  @override
+  void dispose() {
+    _cameraController?.dispose();
+    _passkeyController.dispose();
+    super.dispose();
+  }
+
+  // --- Logic Hub ---
+
   Future<void> _triggerNativeAuth() async {
+    setState(() => _currentMode = AuthMode.biometric);
     final success = await _bioService.authenticateForEntry();
-    if (success) {
-      _navigateToDashboard();
-    }
+    if (success) _navigateToDashboard();
   }
 
   Future<void> _initFaceAuth() async {
+    setState(() => _isVerifying = true);
     final cameras = await availableCameras();
     final front = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
     _cameraController = CameraController(front, ResolutionPreset.medium, enableAudio: false);
     await _cameraController!.initialize();
-    setState(() => _useFaceAuth = true);
+    setState(() {
+      _currentMode = AuthMode.face;
+      _isVerifying = false;
+    });
   }
 
   void _verifyFace() async {
@@ -52,19 +68,32 @@ class _AppLockScreenState extends State<AppLockScreen> {
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      // Calls app-level Face ML verification on the backend
-      final verified = await _authRepo.verifyFacialIdentity("current_session_token", base64Image);
+      // Recognition Logic: Sending to ML service via backend
+      final verified = await _authRepo.verifyFacialIdentity("session_unlock", base64Image);
 
       if (verified) {
         _navigateToDashboard();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Face Identity not recognized"), backgroundColor: Colors.redAccent),
-        );
+        _showError("Face not recognized. Try again or use Passkey.");
       }
     } catch (e) {
-      print(e);
+      _showError("Identity server unreachable.");
     } finally {
+      if (mounted) setState(() => _isVerifying = false);
+    }
+  }
+
+  void _verifyPasskey() async {
+    // Apply validation logic using the Validators class
+    if (!_formKey.currentState!.validate() || _isVerifying) return;
+    
+    setState(() => _isVerifying = true);
+
+    final success = await _authRepo.verifyPasskey(_passkeyController.text);
+    if (success) {
+      _navigateToDashboard();
+    } else {
+      _showError("Invalid Passkey");
       setState(() => _isVerifying = false);
     }
   }
@@ -73,68 +102,147 @@ class _AppLockScreenState extends State<AppLockScreen> {
     Navigator.pushReplacementNamed(context, '/dashboard');
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock_outline, size: 80, color: Colors.blueAccent),
-            const SizedBox(height: 24),
-            const Text(
-              "BlockPay Locked",
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.redAccent)
+    );
+  }
+
+  // --- UI Components ---
+
+  Widget _buildAuthBody() {
+    switch (_currentMode) {
+      case AuthMode.face:
+        return _buildFaceUI();
+      case AuthMode.passkey:
+        return _buildPasskeyUI();
+      default:
+        return _buildBiometricUI();
+    }
+  }
+
+  Widget _buildBiometricUI() {
+    return Column(
+      children: [
+        const Icon(Icons.fingerprint, size: 100, color: BlockPayTheme.electricGreen),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          onPressed: _triggerNativeAuth,
+          child: const Text("TAP SENSOR TO UNLOCK"),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFaceUI() {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return const CircularProgressIndicator(color: BlockPayTheme.electricGreen);
+    }
+    return Column(
+      children: [
+        Container(
+          width: 250,
+          height: 250,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: BlockPayTheme.electricGreen, width: 2),
+          ),
+          child: ClipOval(child: CameraPreview(_cameraController!)),
+        ),
+        const SizedBox(height: 32),
+        _isVerifying 
+          ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
+          : ElevatedButton(
+              onPressed: _verifyFace,
+              style: ElevatedButton.styleFrom(minimumSize: const Size(200, 56)),
+              child: const Text("VERIFY IDENTITY"),
             ),
-            const SizedBox(height: 8),
-            const Text("Verify identity to access your wallet", style: TextStyle(color: Colors.white54)),
-            const SizedBox(height: 60),
-            
-            if (!_useFaceAuth) ...[
-              ElevatedButton.icon(
-                onPressed: _triggerNativeAuth,
-                icon: const Icon(Icons.fingerprint),
-                label: const Text("USE FINGERPRINT / PIN"),
-                style: ElevatedButton.styleFrom(minimumSize: const Size(250, 55)),
+      ],
+    );
+  }
+
+  Widget _buildPasskeyUI() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Form(
+        key: _formKey, // Wrapped in Form for validation
+        child: Column(
+          children: [
+            TextFormField(
+              controller: _passkeyController,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
+              textAlign: TextAlign.center,
+              decoration: const InputDecoration(
+                hintText: "••••••",
+                labelText: "Enter App Passkey",
               ),
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: _initFaceAuth,
-                icon: const Icon(Icons.face),
-                label: const Text("USE FACE IDENTITY"),
-              ),
-            ] else ...[
-              Container(
-                width: 280,
-                height: 280,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.blueAccent, width: 2),
+              keyboardType: TextInputType.number,
+              validator: Validators.validatePasskey, // Applied validator
+            ),
+            const SizedBox(height: 24),
+            _isVerifying 
+              ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
+              : ElevatedButton(
+                  onPressed: _verifyPasskey,
+                  style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 56)),
+                  child: const Text("UNLOCK WALLET"),
                 ),
-                child: ClipOval(
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: CameraPreview(_cameraController!),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-              _isVerifying 
-                ? const CircularProgressIndicator()
-                : FloatingActionButton.extended(
-                    onPressed: _verifyFace,
-                    label: const Text("VERIFY FACE"),
-                    icon: const Icon(Icons.camera),
-                  ),
-              TextButton(
-                onPressed: () => setState(() => _useFaceAuth = false),
-                child: const Text("BACK TO FINGERPRINT"),
-              ),
-            ],
           ],
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    return Scaffold(
+      backgroundColor: BlockPayTheme.obsidianBlack,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Spacer(),
+            const Icon(Icons.shield_outlined, size: 60, color: BlockPayTheme.electricGreen),
+            const SizedBox(height: 16),
+            Text("Security Required", style: theme.textTheme.headlineMedium),
+            const SizedBox(height: 40),
+            
+            Expanded(flex: 3, child: Center(child: _buildAuthBody())),
+            
+            // Mode Switcher Footer
+            Padding(
+              padding: const EdgeInsets.only(bottom: 40),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _modeIconButton(Icons.fingerprint, AuthMode.biometric),
+                  const SizedBox(width: 30),
+                  _modeIconButton(Icons.face, AuthMode.face),
+                  const SizedBox(width: 30),
+                  _modeIconButton(Icons.password, AuthMode.passkey),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modeIconButton(IconData icon, AuthMode mode) {
+    bool isActive = _currentMode == mode;
+    return IconButton(
+      icon: Icon(icon, size: 32),
+      color: isActive ? BlockPayTheme.electricGreen : BlockPayTheme.subtleGrey,
+      onPressed: () {
+        if (mode == AuthMode.face) {
+          _initFaceAuth();
+        } else {
+          setState(() => _currentMode = mode);
+        }
+      },
     );
   }
 }

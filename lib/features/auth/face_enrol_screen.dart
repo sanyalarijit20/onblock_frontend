@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'dart:convert';
+import '../../core/auth/face_detection_service.dart';
 import '/core/auth/auth_repository.dart';
+import '/theme/app_theme.dart';
 
 class FaceEnrollmentScreen extends StatefulWidget {
   const FaceEnrollmentScreen({super.key});
@@ -25,12 +27,19 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
     final front = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
-    _controller = CameraController(front, ResolutionPreset.medium, enableAudio: false);
+    _controller = CameraController(front, ResolutionPreset.high, enableAudio: false);
     await _controller!.initialize();
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
-  void _captureFace() async {
+  @override
+  void dispose() {
+    _controller?.dispose();
+    _faceService.dispose();
+    super.dispose();
+  }
+
+  void _captureAndEnroll() async {
     if (_controller == null || _isProcessing) return;
     setState(() => _isProcessing = true);
 
@@ -39,9 +48,7 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      // In Step 2, we send the image to the ML Microservice via backend
-      // We'll use a placeholder string for "facialData" geometry for now
-      final success = await _authRepo.setupFacial("geometry_hash_placeholder", base64Image);
+      final success = await _authRepo.setupFacial("identity_rail_init", base64Image);
 
       if (success && mounted) {
         Navigator.pushNamed(context, '/security-setup');
@@ -49,31 +56,84 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
     } catch (e) {
       print(e);
     } finally {
-      setState(() => _isProcessing = false);
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(title: const Text("Face Identity Enrollment")),
+      backgroundColor: BlockPayTheme.obsidianBlack,
+      appBar: AppBar(
+        title: const Text("Identity Enrollment"),
+        backgroundColor: Colors.transparent,
+      ),
       body: Column(
         children: [
+          const SizedBox(height: 40),
           Expanded(
-            child: _controller?.value.isInitialized ?? false
-                ? AspectRatio(aspectRatio: _controller!.value.aspectRatio, child: CameraPreview(_controller!))
-                : const Center(child: CircularProgressIndicator()),
+            child: Center(
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Brand colored scanner ring
+                  Container(
+                    width: 320,
+                    height: 320,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: BlockPayTheme.electricGreen.withOpacity(0.3), 
+                        width: 2
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 280,
+                    height: 280,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: BlockPayTheme.electricGreen, width: 2),
+                    ),
+                    child: ClipOval(
+                      child: _controller?.value.isInitialized ?? false
+                          ? CameraPreview(_controller!)
+                          : Container(color: BlockPayTheme.surfaceGrey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.all(40),
             child: Column(
               children: [
-                const Text("Position your face within the frame", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 20),
-                FloatingActionButton.large(
-                  onPressed: _isProcessing ? null : _captureFace,
-                  child: _isProcessing ? const CircularProgressIndicator() : const Icon(Icons.camera_front),
+                Text(
+                  "Align your face within the frame",
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "This creates your app-level biometric identity.",
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: 80,
+                  height: 80,
+                  child: FloatingActionButton(
+                    onPressed: _isProcessing ? null : _captureAndEnroll,
+                    backgroundColor: BlockPayTheme.electricGreen,
+                    foregroundColor: Colors.black,
+                    shape: const CircleBorder(),
+                    child: _isProcessing 
+                        ? const CircularProgressIndicator(color: Colors.black) 
+                        : const Icon(Icons.face_unlock_sharp, size: 36),
+                  ),
                 ),
               ],
             ),

@@ -1,5 +1,3 @@
-
-
 /// Matches backend/src/models/user.model.js
 class UserModel {
   final String id;
@@ -7,6 +5,7 @@ class UserModel {
   final String firstName;
   final String lastName;
   final String phoneNumber;
+  final String? walletAddress; // ADDED: To store the Smart Account Address
   final BiometricData biometric;
   final bool isActive;
   final bool isEmailVerified;
@@ -25,6 +24,7 @@ class UserModel {
     required this.firstName,
     required this.lastName,
     required this.phoneNumber,
+    this.walletAddress, // Optional in constructor
     required this.biometric,
     this.isActive = true,
     this.isEmailVerified = false,
@@ -40,13 +40,16 @@ class UserModel {
 
   // --- UI Getters ---
 
-
   String get fullName => "$firstName $lastName";
 
+  String get username {
+    final cleanFirst = firstName.replaceAll(RegExp(r'\s+'), '').trim();
+    final cleanLast = lastName.replaceAll(RegExp(r'\s+'), '').trim();
+    return "@$cleanFirst$cleanLast";
+  }
 
   String get formattedPhone => "+91 $phoneNumber";
 
-  /// Logic from userSchema.methods.requiresBiometricVerification
   bool get needsBiometricRefresh {
     if (!biometric.isVerified) return true;
     if (biometric.lastVerified == null) return true;
@@ -64,6 +67,9 @@ class UserModel {
       firstName: json['firstName'] ?? '',
       lastName: json['lastName'] ?? '',
       phoneNumber: json['phoneNumber'] ?? '',
+      // MAP BACKEND WALLET FIELD:
+      // Checks for 'walletAddress' OR nested 'wallet.smartAccountAddress'
+      walletAddress: json['walletAddress'] ?? json['wallet']?['smartAccountAddress'],
       biometric: BiometricData.fromJson(json['biometricData'] ?? {}),
       isActive: json['isActive'] ?? true,
       isEmailVerified: json['isEmailVerified'] ?? false,
@@ -84,6 +90,7 @@ class UserModel {
       'lastName': lastName,
       'email': email,
       'phoneNumber': phoneNumber,
+      'walletAddress': walletAddress,
       'preferences': preferences.toJson(),
       'address': address?.toJson(),
     };
@@ -99,8 +106,8 @@ class BiometricData {
   factory BiometricData.fromJson(Map<String, dynamic> json) {
     return BiometricData(
       isVerified: json['isVerified'] ?? false,
-      lastVerified: json['lastVerified'] != null 
-          ? DateTime.parse(json['lastVerified']) 
+      lastVerified: json['lastVerified'] != null
+          ? DateTime.parse(json['lastVerified'])
           : null,
     );
   }

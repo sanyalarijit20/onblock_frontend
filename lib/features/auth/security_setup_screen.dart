@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'dart:io';
 import '../../core/auth/biometric_service.dart';
 import '/core/auth/auth_repository.dart';
-import '../../core/auth/secure_storage.dart';
+import '/theme/app_theme.dart';
 
 class SecuritySetupScreen extends StatefulWidget {
   const SecuritySetupScreen({super.key});
@@ -14,155 +13,95 @@ class SecuritySetupScreen extends StatefulWidget {
 class _SecuritySetupScreenState extends State<SecuritySetupScreen> {
   final _bioService = BiometricService();
   final _authRepo = AuthRepository();
-  final _storage = SecureStorage();
-  
   bool _fingerprintDone = false;
-  bool _isLoaderActive = false;
-
-  /// In a production app, we need to use the 'device_info_plus' package.
-  /// For this demo, we generate a unique hash based on the hardware profile.
-  /// P.S. I have no clue how to implement the device_info_plus package, and we dont have the time for me to learn it
-  /// so we are winging it
-  Future<String> _getDynamicDeviceId() async {
-    // Check if we already have one saved
-    String? existingId = await _storage.getDeviceId();
-    if (existingId != null) return existingId;
-
-    // Generate a pseudo-unique ID 
-    final newId = "BP-${Platform.localHostname}-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}";
-    await _storage.saveDeviceId(newId);
-    return newId;
-  }
+  bool _isProcessing = false;
 
   void _setupFingerprint() async {
-    setState(() => _isLoaderActive = true);
-
-    try {
-      // 1. Local Authentication (The "Gate")
-      final authenticated = await _bioService.authenticate(
-        reason: 'Enroll your fingerprint to secure your Polygon wallet',
-        biometricOnly: true, 
-      );
-
-      if (authenticated) {
-        // 2. Fetch the dynamic Device ID
-        final deviceId = await _getDynamicDeviceId();
-
-        // 3. Link hardware to the Account on the backend
-        // Using a generic token for the demo
-        final success = await _authRepo.setupBiometric("enrolled_hash_v1", deviceId);
-        
-        if (success) {
-          setState(() {
-            _fingerprintDone = true;
-            _isLoaderActive = false;
-          });
-          _showSuccessSheet();
-        } else {
-          throw Exception("Backend failed to link biometric hardware.");
-        }
-      } else {
-        setState(() => _isLoaderActive = false);
-      }
-    } catch (e) {
-      setState(() => _isLoaderActive = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Security Setup Error: $e"), backgroundColor: Colors.redAccent),
-      );
-    }
-  }
-
-  void _showSuccessSheet() {
-    showModalBottomSheet(
-      context: context,
-      isDismissible: false,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.verified_user, size: 64, color: Colors.greenAccent),
-            const SizedBox(height: 16),
-            const Text("Hardware Secured", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text("Your fingerprint is now bound to this device ID for all gasless transactions."),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context); // Close sheet
-                Navigator.pushNamed(context, '/wallet-setup'); // Move to Step 4
-              },
-              child: const Text("Continue to Wallet Creation"),
-            )
-          ],
-        ),
-      ),
+    setState(() => _isProcessing = true);
+    final authenticated = await _bioService.authenticate(
+      reason: 'Enroll your hardware fingerprint for rapid payments',
+      biometricOnly: true,
     );
+
+    if (authenticated) {
+      final success = await _authRepo.setupBiometric("device_auth_v1", "HP_EliteBook_G11");
+      if (success) {
+        setState(() => _fingerprintDone = true);
+      }
+    }
+    setState(() => _isProcessing = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(title: const Text("App Security")),
+      backgroundColor: BlockPayTheme.obsidianBlack,
+      appBar: AppBar(title: const Text("Hardware Security")),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text("Step 3: Secure your wallet", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            const Text("Enroll your fingerprint to enable gasless payments with Biconomy paymasters."),
-            const SizedBox(height: 40),
+            Text("Step 3: Device Binding", style: theme.textTheme.headlineMedium),
+            const SizedBox(height: 12),
+            Text(
+              "Bind your physical fingerprint to your BlockPay wallet for gasless transactions.",
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 48),
             
-            // Interaction Card
-            InkWell(
-              onTap: _fingerprintDone || _isLoaderActive ? null : _setupFingerprint,
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _fingerprintDone ? Colors.greenAccent : Colors.white10),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      _fingerprintDone ? Icons.check_circle : Icons.fingerprint, 
-                      size: 48, 
-                      color: _fingerprintDone ? Colors.greenAccent : Colors.blueAccent
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _fingerprintDone ? "Biometrics Active" : "Enroll Fingerprint", 
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
-                          ),
-                          Text(
-                            _fingerprintDone ? "Device ID linked successfully" : "Tap to start enrollment", 
-                            style: const TextStyle(color: Colors.white60)
-                          ),
-                        ],
+            // Themed Card for Fingerprint
+            Card(
+              child: InkWell(
+                onTap: _fingerprintDone || _isProcessing ? null : _setupFingerprint,
+                borderRadius: BorderRadius.circular(24),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: BlockPayTheme.electricGreen.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          _fingerprintDone ? Icons.verified : Icons.fingerprint,
+                          size: 40,
+                          color: BlockPayTheme.electricGreen,
+                        ),
                       ),
-                    ),
-                    if (_isLoaderActive) const CircularProgressIndicator(),
-                  ],
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _fingerprintDone ? "Fingerprint Bound" : "Link Fingerprint",
+                              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              _fingerprintDone ? "Hardware identity active" : "Tap to enroll sensor",
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_isProcessing) 
+                        const CircularProgressIndicator(strokeWidth: 2),
+                    ],
+                  ),
                 ),
               ),
             ),
             
             const Spacer(),
-            
-            // Navigation Action
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _fingerprintDone ? () => Navigator.pushNamed(context, '/wallet-setup') : null,
-                child: const Text("FINAL STEP: GENERATE WALLET"),
-              ),
+            ElevatedButton(
+              onPressed: _fingerprintDone ? () => Navigator.pushNamed(context, '/wallet-setup') : null,
+              style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 56)),
+              child: const Text("FINALIZE SETUP"),
             )
           ],
         ),
