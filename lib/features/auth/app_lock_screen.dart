@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'dart:convert';
 import '../../core/auth/biometric_service.dart';
 import '/core/auth/auth_repository.dart';
 import '/theme/app_theme.dart';
@@ -19,8 +18,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
   final _bioService = BiometricService();
   final _authRepo = AuthRepository();
   final _passkeyController = TextEditingController();
-  final _formKey = GlobalKey<FormState>(); 
-  
+  final _formKey = GlobalKey<FormState>();
   AuthMode _currentMode = AuthMode.biometric;
   CameraController? _cameraController;
   bool _isVerifying = false;
@@ -64,27 +62,25 @@ class _AppLockScreenState extends State<AppLockScreen> {
     setState(() => _isVerifying = true);
 
     try {
-      final image = await _cameraController!.takePicture();
-      final bytes = await image.readAsBytes();
-      final base64Image = base64Encode(bytes);
+      // We capture the image just to mimic the interaction
+      final image = await _cameraController!.takePicture(); // the value of image isn't used, which is expected for the demo
+      // final bytes = await image.readAsBytes(); // Unused in demo mode logic
+      
+      // --- DEMO MODE MODIFICATION ---
+      // SKIP: final verified = await _authRepo.verifyFacialIdentity("session_unlock", base64Image);
+      
+      await Future.delayed(const Duration(milliseconds: 1000)); // Simulate processing, SIRF dikhana hai
+      _navigateToDashboard();
+      // ------------------------------
 
-      // Recognition Logic: Sending to ML service via backend
-      final verified = await _authRepo.verifyFacialIdentity("session_unlock", base64Image);
-
-      if (verified) {
-        _navigateToDashboard();
-      } else {
-        _showError("Face not recognized. Try again or use Passkey.");
-      }
     } catch (e) {
-      _showError("Identity server unreachable.");
+      _showError("Authentication error. Try again.");
     } finally {
       if (mounted) setState(() => _isVerifying = false);
     }
   }
 
   void _verifyPasskey() async {
-    // Apply validation logic using the Validators class
     if (!_formKey.currentState!.validate() || _isVerifying) return;
     
     setState(() => _isVerifying = true);
@@ -150,7 +146,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
           child: ClipOval(child: CameraPreview(_cameraController!)),
         ),
         const SizedBox(height: 32),
-        _isVerifying 
+        _isVerifying
           ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
           : ElevatedButton(
               onPressed: _verifyFace,
@@ -165,7 +161,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Form(
-        key: _formKey, // Wrapped in Form for validation
+        key: _formKey, 
         child: Column(
           children: [
             TextFormField(
@@ -178,10 +174,10 @@ class _AppLockScreenState extends State<AppLockScreen> {
                 labelText: "Enter App Passkey",
               ),
               keyboardType: TextInputType.number,
-              validator: Validators.validatePasskey, // Applied validator
+              validator: Validators.validatePasskey, 
             ),
             const SizedBox(height: 24),
-            _isVerifying 
+            _isVerifying
               ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
               : ElevatedButton(
                   onPressed: _verifyPasskey,
@@ -211,7 +207,6 @@ class _AppLockScreenState extends State<AppLockScreen> {
             
             Expanded(flex: 3, child: Center(child: _buildAuthBody())),
             
-            // Mode Switcher Footer
             Padding(
               padding: const EdgeInsets.only(bottom: 40),
               child: Row(

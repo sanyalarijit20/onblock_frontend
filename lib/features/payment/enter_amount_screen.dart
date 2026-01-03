@@ -6,7 +6,7 @@ import 'transaction_service.dart';
 class EnterAmountScreen extends StatefulWidget {
   final String toAddress;
 
-  const EnterAmountScreen({Key? key, required this.toAddress}) : super(key: key);
+  const EnterAmountScreen({super.key, required this.toAddress});
 
   @override
   State<EnterAmountScreen> createState() => _EnterAmountScreenState();

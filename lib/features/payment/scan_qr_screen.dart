@@ -5,7 +5,7 @@ import 'enter_amount_screen.dart';
 import '/utils/eip681_parser.dart'; 
 
 class ScannerScreen extends StatefulWidget {
-  const ScannerScreen({Key? key}) : super(key: key);
+  const ScannerScreen({super.key});
 
   @override
   State<ScannerScreen> createState() => _ScannerScreenState();

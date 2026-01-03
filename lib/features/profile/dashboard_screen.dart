@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; 
 import 'package:glassmorphism/glassmorphism.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '/theme/app_theme.dart';
@@ -6,7 +7,7 @@ import '../../models/transaction_model.dart';
 import '../../core/auth/secure_storage.dart';
 import '/core/auth/auth_repository.dart';
 import 'profile_screen.dart';
-import '/models/user_models.dart'; 
+import '/models/user_models.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,9 +20,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _storage = SecureStorage();
   final _authRepo = AuthRepository();
   bool _isLoading = true;
-  
   String _walletAddress = "...";
-  UserModel? _currentUser; 
+  UserModel? _currentUser;
   List<TransactionModel> _recentTransactions = [];
 
   @override
@@ -34,23 +34,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 1. Fetch wallet address locally
       final address = await _storage.getWalletAddress();
-      
-      // 2. Fetch User Profile (Network Call)
       final userProfile = await _authRepo.getProfile();
-
-      // 3. Fetch Transactions (Network Call)
       final transactions = await _authRepo.getTransactions(limit: 5);
 
       if (mounted) {
         setState(() {
           _walletAddress = address ?? "0x0000...0000";
-          
           if (userProfile != null) {
             _currentUser = userProfile;
           }
-          
           _recentTransactions = transactions;
           _isLoading = false;
         });
@@ -58,7 +51,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        // Fail silently on UI but log/show snackbar
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Sync Error: $e'), backgroundColor: Colors.red),
         );
@@ -78,7 +70,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => ProfileScreen(
-          user: _currentUser!, 
+          user: _currentUser!,
           walletAddress: _walletAddress,
         ),
       ),
@@ -149,11 +141,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: CircleAvatar(
                   radius: 22,
                   backgroundColor: BlockPayTheme.surfaceGrey,
-                  backgroundImage: _currentUser?.profilePicture != null 
-                      ? NetworkImage(_currentUser!.profilePicture!) 
+                  backgroundImage: _currentUser?.profilePicture != null
+                      ? NetworkImage(_currentUser!.profilePicture!)
                       : null,
-                  child: _currentUser?.profilePicture == null 
-                      ? const Icon(Icons.person, color: BlockPayTheme.electricGreen) 
+                  child: _currentUser?.profilePicture == null
+                      ? const Icon(Icons.person, color: BlockPayTheme.electricGreen)
                       : null,
                 ),
               ),
@@ -246,8 +238,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 16),
             InkWell(
-              onTap: () {
-                // Clipboard copy logic
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: _walletAddress));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Address copied to clipboard!"),
+                      duration: Duration(seconds: 2),
+                      backgroundColor: BlockPayTheme.electricGreen,
+                    ),
+                  );
+                }
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

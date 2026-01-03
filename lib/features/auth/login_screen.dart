@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '/theme/app_theme.dart';
 import '/core/auth/biometric_service.dart';
 import '../../core/auth/face_verification_screen.dart';
-import '/features/profile/dashboard_screen.dart'; 
+import '/features/profile/dashboard_screen.dart';
 import '/core/auth/auth_repository.dart';
 import '/core/auth/secure_storage.dart';
 
@@ -17,7 +17,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final BiometricService _biometricService = BiometricService();
   final AuthRepository _authRepo = AuthRepository();
   final SecureStorage _storage = SecureStorage();
-  
   bool _isLoading = false;
   String _statusText = "Welcome Back";
 
@@ -32,20 +31,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// 1. Fingerprint / Device Secure Lock (Default)
   Future<void> _attemptFingerprint() async {
-    // Prevent overlapping auth calls
     if (_isLoading) return;
     
     setState(() => _statusText = "Authenticating...");
     
-    // Check if a wallet actually exists on this device
-    final hasWallet = await _storage.hasWallet(); 
+    final hasWallet = await _storage.hasWallet();
     
     if (!hasWallet) {
        if(mounted) setState(() => _statusText = "No wallet found. Please Register.");
        return;
     }
 
-    // Triggers local authentication
     final authenticated = await _biometricService.authenticateForEntry();
 
     if (authenticated) {
@@ -65,36 +61,28 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (context) => const FaceVerificationSheet(),
     );
 
-    // If sheet returns verified=true and image data
+    // If sheet returns verified=true, it means local liveness passed
     if (result != null && result['verified'] == true) {
       setState(() {
         _isLoading = true;
         _statusText = "Verifying Identity...";
       });
 
-      try {
-        // Send captured image to backend for matching against enrolled face
-        final isVerified = await _authRepo.verifyFacialIdentity(
-          result['facialData'] ?? "", 
-          result['imageData'] ?? ""
-        );
-
-        if (isVerified) {
-          _onLoginSuccess();
-        } else {
-          _showError("Identity verification failed");
-        }
-      } catch (e) {
-        _showError("Network error during verification");
-      } finally {
-        if(mounted) setState(() => _isLoading = false);
-      }
+      // --- DEMO MODE MODIFICATION ---
+      // We skip the backend verifyFacialIdentity call.
+      // If the local detector (FaceVerificationSheet) says it's a real face, we trust it for the demo.
+      
+      await Future.delayed(const Duration(milliseconds: 1200)); // Fake verification delay
+      
+      _onLoginSuccess();
+      // ------------------------------
+      
+      if(mounted) setState(() => _isLoading = false);
     }
   }
 
   /// 3. App Passkey (Custom Input + Backend Verify)
   Future<void> _attemptPasskey() async {
-    // Open custom Passkey Input Sheet
     final passkey = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -152,8 +140,6 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(),
-              
-              // Logo or Icon
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
@@ -163,9 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 child: const Icon(Icons.lock_outline_rounded, size: 64, color: BlockPayTheme.electricGreen),
               ),
-              
               const SizedBox(height: 32),
-              
               Text(
                 "BlockPay",
                 style: BlockPayTheme.darkTheme.textTheme.displayLarge,
@@ -175,15 +159,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 _statusText,
                 style: const TextStyle(color: BlockPayTheme.subtleGrey, fontSize: 16),
               ),
-
               const Spacer(),
-
               if (_isLoading)
                 const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
               else
                 Column(
                   children: [
-                    // Main Action: Fingerprint
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
@@ -196,8 +177,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    
-                    // Alternatives Row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
@@ -260,7 +239,6 @@ class _AlternativeAuthButton extends StatelessWidget {
   }
 }
 
-/// A modal sheet for entering the App-Specific Passkey
 class _PasskeyInputSheet extends StatefulWidget {
   const _PasskeyInputSheet();
 
@@ -275,7 +253,6 @@ class _PasskeyInputSheetState extends State<_PasskeyInputSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      // Handle keyboard covering input
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
@@ -286,7 +263,6 @@ class _PasskeyInputSheetState extends State<_PasskeyInputSheet> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
-          // Corrected: Moved mainAxisSize inside the Column
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

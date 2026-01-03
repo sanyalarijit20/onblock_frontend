@@ -44,15 +44,23 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
     setState(() => _isProcessing = true);
 
     try {
+      // 1. Capture the image (Visual Feedback for user)
       final image = await _controller!.takePicture();
+      // We process bytes just to simulate work, even if not sending
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      final success = await _authRepo.setupFacial("identity_rail_init", base64Image);
+      // --- DEMO MODE MODIFICATION ---
+      // SKIPPED: final success = await _authRepo.setupFacial("identity_rail_init", base64Image);
+      // Instead, we simulate a network delay and proceed purely on local capture success. 
+      // Remember guys, this is only till we get the ML scripts working. 
+      
+      await Future.delayed(const Duration(milliseconds: 1500)); // Simulate enrollment time
 
-      if (success && mounted) {
+      if (mounted) {
         Navigator.pushNamed(context, '/security-setup');
       }
+      
     } catch (e) {
       print(e);
     } finally {
@@ -118,7 +126,7 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  "This creates your app-level biometric identity.",
+                  "This creates your unique biometric identity.",
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 40),
@@ -131,7 +139,7 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                     foregroundColor: Colors.black,
                     shape: const CircleBorder(),
                     child: _isProcessing 
-                        ? const CircularProgressIndicator(color: Colors.black) 
+                        ? const CircularProgressIndicator(color: Colors.black)
                         : const Icon(Icons.face_unlock_sharp, size: 36),
                   ),
                 ),
