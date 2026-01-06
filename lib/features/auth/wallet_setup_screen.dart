@@ -48,7 +48,7 @@ class _WalletSetupScreenState extends State<WalletSetupScreen> {
             children: [
               _isGenerating 
                 ? Lottie.asset(
-                    'assets/animations/wallet_gen.json',
+                    'assets/Wallet.json',
                     width: 250,
                     height: 250,
                   )
