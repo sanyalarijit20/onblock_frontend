@@ -3,7 +3,7 @@ import 'dart:io';
 
 class AppConfig {
   /// Toggle this to [true] for the Vercel deployment.
-  static const bool isProduction = false;
+  static const bool isProduction = true;
 
   
   static const bool useMockAi = false; 
@@ -15,7 +15,7 @@ class AppConfig {
   static const String _localIp = "192.168.29.104";
   
   /// The Vercel deployment URL (Mock)
-  static const String _productionBaseUrl = "https://blockpay-backend.vercel.app/api/v1";
+  static const String _productionBaseUrl = "https://onblock-backend.vercel.app/api/v1";
 
   /// Logic to determine the active Base URL
   static String get baseUrl {
