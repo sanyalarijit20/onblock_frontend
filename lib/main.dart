@@ -1,54 +1,59 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'core/auth/secure_storage.dart';
 import 'features/auth/app_lock_screen.dart';
 import 'features/auth/registration_screen.dart';
-import 'features/auth/face_enrol_screen.dart';
+import 'features/auth/face_enrol_screen.dart'; 
 import 'features/auth/security_setup_screen.dart';
 import 'features/auth/wallet_setup_screen.dart';
 import 'features/profile/dashboard_screen.dart'; 
-import '/theme/app_theme.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
-  // Ensures the Flutter engine is fully initialized before we access platform-specific 
-  // features like Secure Storage or the Camera 
+  // Ensuring the Flutter engine is ready for Fedora/Android platform channels
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Set preferred orientations for consistent Biometric scanning UI
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   final storage = SecureStorage();
   
-  // Checking local device state to determine entry point
-  final bool hasWallet = await storage.hasWallet();
-  final bool hasToken = await storage.hasToken();
+  // Checking local device state to determine entry point for the "Invisible Rail"
+  final bool hasWallet = await storage.hasWallet(); // Smart Account address exists
+  final bool hasToken = await storage.hasToken();   // JWT exists
 
-  // Smart Routing Logic for "Invisible Rail" Onboarding:
-  // 1. If wallet exists (Private key saved) -> Standard App Entry (Lock Screen)
-  // 2. If token exists but no wallet -> User left during setup, resume at Face Enrollment
-  // 3. Otherwise -> First time user (Registration)
   String initialRoute = '/register';
   
-  if (hasWallet) {
+  if (hasWallet && hasToken) {
     initialRoute = '/lock';
-  } else if (hasToken) {
+  } else if (hasToken && !hasWallet) {
+    // If they have a session but setup was interrupted, send back to biometrics
     initialRoute = '/face-enrollment';
   }
 
-  runApp(BlockPayApp(initialRoute: initialRoute));
+  runApp(OnBlockApp(initialRoute: initialRoute));
 }
 
-class BlockPayApp extends StatelessWidget {
+class OnBlockApp extends StatelessWidget {
   final String initialRoute;
-  const BlockPayApp({super.key, required this.initialRoute});
+  const OnBlockApp({super.key, required this.initialRoute});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'BlockPay',
+      title: 'OnBlock',
       debugShowCheckedModeBanner: false,
       
-      // Applying custom BlockPay Obsidian & Electric Green theme
+      // Applying the custom Obsidian & Electric Green theme for the MVP
       themeMode: ThemeMode.dark,
+      theme: BlockPayTheme.darkTheme, // Fallback if system is light
       darkTheme: BlockPayTheme.darkTheme,
       
       initialRoute: initialRoute,
+      
+      // Standardized routes for the CSE project demo
       routes: {
         '/lock': (context) => const AppLockScreen(),
         '/register': (context) => const RegistrationScreen(),
