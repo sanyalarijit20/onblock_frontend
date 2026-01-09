@@ -1,7 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'dart:convert';
 import 'dart:io';
 import '/theme/app_theme.dart';
 import 'face_detection_service.dart';
@@ -18,7 +17,10 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   CameraController? _controller;
   bool _isCameraInitialized = false;
   bool _isDetecting = false;
-  String _statusMessage = "Align your face within the frame";
+  String _statusMessage = "Blink to confirm payment";
+  
+  // Liveness Tracking
+  bool _eyesClosedPreviously = false;
 
   @override
   void initState() {
@@ -29,7 +31,6 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   Future<void> _initializeCamera() async {
     try {
       final cameras = await availableCameras();
-      // Use front camera
       final frontCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
@@ -39,9 +40,7 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
         frontCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: Platform.isAndroid
-            ? ImageFormatGroup.nv21
-            : ImageFormatGroup.bgra8888,
+        imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
       );
 
       await _controller!.initialize();
@@ -55,30 +54,25 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   }
 
   void _startDetectionStream() {
-    // Process every 10th frame to save battery/cpu
     int frameCount = 0;
     
     _controller?.startImageStream((CameraImage image) async {
       frameCount++;
-      if (frameCount % 10 != 0) return;
+      if (frameCount % 5 != 0) return; // Process every 5th frame
       if (_isDetecting) return;
 
       _isDetecting = true;
 
       try {
-        // 1. Detect Face using the service
-        // Note: sensorOrientation needs to be dynamic in production, hardcoded 270/90 for portrait common cases
-        final faces = await _faceService.detectFaces(image, 270);
+        final faces = await _faceService.detectFaces(image, 270); // Assume portrait
 
         if (faces.isNotEmpty) {
           final face = faces.first;
-          
-          // 2. Liveness & Position Checks
-          if (_validateFace(face, image)) {
-             await _captureAndFinish();
-          }
+          _validateLiveness(face);
         } else {
-          if (mounted) setState(() => _statusMessage = "No face detected");
+          // Reset state if face lost
+          _eyesClosedPreviously = false;
+          if (mounted) setState(() => _statusMessage = "Align face within frame");
         }
       } catch (e) {
         print("Detection Error: $e");
@@ -88,43 +82,29 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
     });
   }
 
-  bool _validateFace(Face face, CameraImage image) {
-    final double leftEyeProb = face.leftEyeOpenProbability ?? 0.0;
-    final double rightEyeProb = face.rightEyeOpenProbability ?? 0.0;
+  void _validateLiveness(Face face) {
+    if(!mounted) return;
 
-    // Check 1: Are eyes open?
-    if (leftEyeProb < 0.5 || rightEyeProb < 0.5) {
-      if (mounted) setState(() => _statusMessage = "Please open your eyes");
-      return false;
+    bool isClosed = _faceService.areEyesClosed(face);
+
+    if (isClosed) {
+      _eyesClosedPreviously = true;
+      setState(() => _statusMessage = "Processing... Open Eyes");
+    } else {
+      // Eyes are open now. Were they closed before?
+      if (_faceService.checkForBlink(face, _eyesClosedPreviously)) {
+        _confirmVerification();
+      }
     }
-
-    // Check 2: Is face roughly centered/visible?
-    if (mounted) setState(() => _statusMessage = "Hold still...");
-    return true;
   }
 
-  Future<void> _captureAndFinish() async {
-    // Stop stream to prevent multiple triggers
+  Future<void> _confirmVerification() async {
     await _controller?.stopImageStream();
     
-    if (!mounted) return;
-    setState(() => _statusMessage = "Verifying...");
-
-    try {
-      // Capture high-res image for backend
-      final XFile file = await _controller!.takePicture();
-      final bytes = await file.readAsBytes();
-      final base64Image = base64Encode(bytes);
-
-      if (mounted) {
-        Navigator.pop(context, {
-          'verified': true,
-          'facialData': 'face_geometry_mock', // ML Kit provides geometry, but backend might expect specific format
-          'imageData': base64Image,
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _statusMessage = "Capture Failed");
+    if (mounted) {
+      setState(() => _statusMessage = "Verified!");
+      // Return success to the caller (Payment Screen or Login)
+      Navigator.pop(context, {'verified': true});
     }
   }
 
@@ -138,7 +118,7 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
+      height: MediaQuery.of(context).size.height * 0.75,
       decoration: const BoxDecoration(
         color: BlockPayTheme.obsidianBlack,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -152,16 +132,19 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
             decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(height: 24),
-          Text("Facial Verification", style: BlockPayTheme.darkTheme.textTheme.headlineMedium),
+          Text("Confirm Transaction", style: BlockPayTheme.darkTheme.textTheme.headlineMedium),
           const SizedBox(height: 32),
           
           // Circular Camera Preview
           Container(
-            width: 300,
-            height: 300,
+            width: 280,
+            height: 280,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: BlockPayTheme.electricGreen, width: 4),
+              border: Border.all(
+                color: _statusMessage == "Verified!" ? BlockPayTheme.electricGreen : Colors.white24, 
+                width: 4
+              ),
             ),
             child: ClipOval(
               child: _isCameraInitialized
@@ -173,12 +156,17 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
           const SizedBox(height: 32),
           Text(
             _statusMessage,
-            style: const TextStyle(color: BlockPayTheme.electricGreen, fontSize: 16, fontWeight: FontWeight.bold),
+            style: const TextStyle(color: BlockPayTheme.electricGreen, fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Blink to authorize payment",
+            style: TextStyle(color: Colors.white54, fontSize: 14),
           ),
           const Spacer(),
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+            child: const Text("Cancel", style: TextStyle(color: Colors.redAccent)),
           ),
           const SizedBox(height: 24),
         ],

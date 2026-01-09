@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'dart:convert';
+import 'dart:io';
 import '../../core/auth/face_detection_service.dart';
-import '/core/auth/auth_repository.dart';
+import '../../core/auth/auth_repository.dart';
 import '/theme/app_theme.dart';
 
 class FaceEnrollmentScreen extends StatefulWidget {
@@ -14,9 +15,11 @@ class FaceEnrollmentScreen extends StatefulWidget {
 
 class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   CameraController? _controller;
-  final _faceService = FaceDetectionService();
+  // Note: Ensure the file is named face_detection_service.dart
+  final _faceService = FaceDetectionService(); 
   final _authRepo = AuthRepository();
   bool _isProcessing = false;
+  String _feedbackText = "Align face within the ring";
 
   @override
   void initState() {
@@ -26,8 +29,18 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
 
   Future<void> _initCamera() async {
     final cameras = await availableCameras();
-    final front = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
-    _controller = CameraController(front, ResolutionPreset.high, enableAudio: false);
+    final front = cameras.firstWhere(
+      (c) => c.lensDirection == CameraLensDirection.front,
+      orElse: () => cameras.first
+    );
+    
+    _controller = CameraController(
+      front, 
+      ResolutionPreset.medium, 
+      enableAudio: false,
+      imageFormatGroup: Platform.isAndroid ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+    );
+    
     await _controller!.initialize();
     if (mounted) setState(() {});
   }
@@ -41,28 +54,52 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
 
   void _captureAndEnroll() async {
     if (_controller == null || _isProcessing) return;
-    setState(() => _isProcessing = true);
+    if (!mounted) return;
+
+    setState(() {
+      _isProcessing = true;
+      _feedbackText = "Encrypting Biometric Data...";
+    });
 
     try {
-      // 1. Capture the image (Visual Feedback for user)
-      final image = await _controller!.takePicture();
-      // We process bytes just to simulate work, even if not sending
+      // 1. Capture Image
+      final XFile image = await _controller!.takePicture();
       final bytes = await image.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      // --- DEMO MODE MODIFICATION ---
-      // SKIPPED: final success = await _authRepo.setupFacial("identity_rail_init", base64Image);
-      // Instead, we simulate a network delay and proceed purely on local capture success. 
-      // Remember guys, this is only till we get the ML scripts working. 
-      
-      await Future.delayed(const Duration(milliseconds: 1500)); // Simulate enrollment time
+      // 2. Call AuthRepository
+      // 'facialData' is a placeholder string here. 
+      // In a full implementation, you might pass actual ML Kit landmarks json here.
+      final bool success = await _authRepo.setupFacial(
+        "identity_rail_init", 
+        base64Image
+      );
 
-      if (mounted) {
-        Navigator.pushNamed(context, '/security-setup');
+      if (success) {
+        if (mounted) {
+          setState(() => _feedbackText = "Identity Verified!");
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Biometric Enrollment Complete"),
+              backgroundColor: BlockPayTheme.electricGreen,
+            )
+          );
+          
+          // Navigate to next step (Security Setup)
+          Navigator.pushReplacementNamed(context, '/security-setup');
+        }
+      } else {
+        throw Exception("Server rejected biometric data.");
       }
-      
+
     } catch (e) {
-      print(e);
+      if (mounted) {
+        setState(() => _feedbackText = "Enrollment Failed. Try Again.");
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: ${e.toString()}"), backgroundColor: Colors.redAccent)
+        );
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
@@ -71,12 +108,14 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
     
     return Scaffold(
       backgroundColor: BlockPayTheme.obsidianBlack,
       appBar: AppBar(
         title: const Text("Identity Enrollment"),
         backgroundColor: Colors.transparent,
+        automaticallyImplyLeading: false,
       ),
       body: Column(
         children: [
@@ -86,29 +125,40 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // Brand colored scanner ring
-                  Container(
-                    width: 320,
-                    height: 320,
+                  // Outer Glow Ring
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 500),
+                    width: size.width * 0.8,
+                    height: size.width * 0.8,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: BlockPayTheme.electricGreen.withOpacity(0.3), 
-                        width: 2
+                        color: _isProcessing 
+                            ? BlockPayTheme.electricGreen 
+                            : BlockPayTheme.electricGreen.withOpacity(0.3),
+                        width: _isProcessing ? 6 : 2
                       ),
+                      boxShadow: _isProcessing ? [
+                         BoxShadow(
+                           color: BlockPayTheme.electricGreen.withOpacity(0.4),
+                           blurRadius: 30,
+                           spreadRadius: 5
+                         )
+                      ] : [],
                     ),
                   ),
+                  // Camera Feed
                   Container(
-                    width: 280,
-                    height: 280,
-                    decoration: BoxDecoration(
+                    width: size.width * 0.72,
+                    height: size.width * 0.72,
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: BlockPayTheme.electricGreen, width: 2),
+                      color: Colors.black,
                     ),
                     child: ClipOval(
                       child: _controller?.value.isInitialized ?? false
                           ? CameraPreview(_controller!)
-                          : Container(color: BlockPayTheme.surfaceGrey),
+                          : const Center(child: CircularProgressIndicator(color: BlockPayTheme.electricGreen)),
                     ),
                   ),
                 ],
@@ -120,14 +170,18 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
             child: Column(
               children: [
                 Text(
-                  "Align your face within the frame",
+                  _feedbackText,
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyLarge,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: _isProcessing ? BlockPayTheme.electricGreen : Colors.white,
+                    fontWeight: FontWeight.bold
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 16),
                 Text(
-                  "This creates your unique biometric identity.",
-                  style: theme.textTheme.bodyMedium,
+                  "Face Identity Setup Complete.",
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white54),
                 ),
                 const SizedBox(height: 40),
                 SizedBox(
@@ -137,10 +191,14 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                     onPressed: _isProcessing ? null : _captureAndEnroll,
                     backgroundColor: BlockPayTheme.electricGreen,
                     foregroundColor: Colors.black,
+                    elevation: 10,
                     shape: const CircleBorder(),
-                    child: _isProcessing 
-                        ? const CircularProgressIndicator(color: Colors.black)
-                        : const Icon(Icons.face_unlock_sharp, size: 36),
+                    child: _isProcessing
+                        ? const Padding(
+                            padding: EdgeInsets.all(20.0),
+                            child: CircularProgressIndicator(color: Colors.black, strokeWidth: 3),
+                          )
+                        : const Icon(Icons.camera_alt, size: 36),
                   ),
                 ),
               ],

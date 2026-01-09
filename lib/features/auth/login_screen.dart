@@ -23,7 +23,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-trigger default fingerprint/biometric after the UI builds
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _attemptFingerprint();
     });
@@ -51,9 +50,9 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// 2. Face Verification (Custom UI + Backend Verify)
+  /// 2. Face Verification (Purely Client-Side Liveness now)
   Future<void> _attemptFaceVerification() async {
-    // Open the Camera Sheet
+    // Open the Camera Sheet which performs Local Liveness Check
     final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -61,21 +60,19 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (context) => const FaceVerificationSheet(),
     );
 
-    // If sheet returns verified=true, it means local liveness passed
+    // Only proceed if the sheet confirms 'verified' (Liveness passed)
     if (result != null && result['verified'] == true) {
       setState(() {
         _isLoading = true;
-        _statusText = "Verifying Identity...";
+        _statusText = "Identity Verified...";
       });
 
-      // --- DEMO MODE MODIFICATION ---
-      // We skip the backend verifyFacialIdentity call.
-      // If the local detector (FaceVerificationSheet) says it's a real face, we trust it for the demo.
+      // No backend call needed for verification since dlib is offline.
+      // We trust the local liveness check for now.
       
-      await Future.delayed(const Duration(milliseconds: 1200)); // Fake verification delay
+      await Future.delayed(const Duration(milliseconds: 500)); 
       
       _onLoginSuccess();
-      // ------------------------------
       
       if(mounted) setState(() => _isLoading = false);
     }

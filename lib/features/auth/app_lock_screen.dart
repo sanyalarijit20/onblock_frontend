@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'dart:convert';
+import 'dart:io';
 import '../../core/auth/biometric_service.dart';
-import '/core/auth/auth_repository.dart';
+import '../../core/auth/auth_repository.dart';
 import '/theme/app_theme.dart';
-import '../../utils/validators.dart';
 
 enum AuthMode { biometric, face, passkey }
 
@@ -18,15 +19,16 @@ class _AppLockScreenState extends State<AppLockScreen> {
   final _bioService = BiometricService();
   final _authRepo = AuthRepository();
   final _passkeyController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  
   AuthMode _currentMode = AuthMode.biometric;
   CameraController? _cameraController;
   bool _isVerifying = false;
+  String _statusMessage = "Select authentication method";
 
   @override
   void initState() {
     super.initState();
-    // Start with Fingerprint prompt automatically
+    // Auto-trigger biometric (fingerprint) on load
     _triggerNativeAuth();
   }
 
@@ -37,157 +39,110 @@ class _AppLockScreenState extends State<AppLockScreen> {
     super.dispose();
   }
 
-  // --- Logic Hub ---
-
+  // --- 1. Fingerprint Logic ---
   Future<void> _triggerNativeAuth() async {
-    setState(() => _currentMode = AuthMode.biometric);
+    if (!mounted) return;
+    setState(() {
+      _currentMode = AuthMode.biometric;
+      _statusMessage = "Touch sensor to unlock";
+    });
+
     final success = await _bioService.authenticateForEntry();
-    if (success) _navigateToDashboard();
+    if (success) {
+      _unlockApp();
+    } else {
+      if (mounted) setState(() => _statusMessage = "Authentication failed");
+    }
   }
 
+  // --- 2. Face Auth Logic (Connected to AuthRepo) ---
   Future<void> _initFaceAuth() async {
-    setState(() => _isVerifying = true);
-    final cameras = await availableCameras();
-    final front = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.front);
-    _cameraController = CameraController(front, ResolutionPreset.medium, enableAudio: false);
-    await _cameraController!.initialize();
     setState(() {
       _currentMode = AuthMode.face;
-      _isVerifying = false;
+      _statusMessage = "Initializing Camera...";
     });
+
+    final cameras = await availableCameras();
+    final front = cameras.firstWhere(
+      (c) => c.lensDirection == CameraLensDirection.front,
+      orElse: () => cameras.first
+    );
+
+    _cameraController = CameraController(
+      front, 
+      ResolutionPreset.medium, 
+      enableAudio: false
+    );
+
+    await _cameraController!.initialize();
+    if (mounted) {
+      setState(() {
+        _statusMessage = "Look at the camera to unlock";
+      });
+      // Automatically snap and verify after a brief pause to let camera adjust
+      Future.delayed(const Duration(milliseconds: 500), _scanAndVerifyFace);
+    }
   }
 
-  void _verifyFace() async {
-    if (_cameraController == null || _isVerifying) return;
+  Future<void> _scanAndVerifyFace() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_isVerifying) return;
+
     setState(() => _isVerifying = true);
 
     try {
-      // We capture the image just to mimic the interaction
-      final image = await _cameraController!.takePicture(); // the value of image isn't used, which is expected for the demo
-      // final bytes = await image.readAsBytes(); // Unused in demo mode logic
-      
-      // --- DEMO MODE MODIFICATION ---
-      // SKIP: final verified = await _authRepo.verifyFacialIdentity("session_unlock", base64Image);
-      
-      await Future.delayed(const Duration(milliseconds: 1000)); // Simulate processing, SIRF dikhana hai
-      _navigateToDashboard();
-      // ------------------------------
+      final image = await _cameraController!.takePicture();
+      final bytes = await image.readAsBytes();
+      final base64Image = base64Encode(bytes);
 
+      setState(() => _statusMessage = "Verifying Identity...");
+
+      // Call AuthRepository to verify face
+      // "session_unlock" is a context string for the backend to know why we are verifying
+      final bool isValid = await _authRepo.verifyFacialIdentity(
+        "session_unlock", 
+        base64Image
+      );
+
+      if (isValid) {
+        _unlockApp();
+      } else {
+        if (mounted) setState(() => _statusMessage = "Face not recognized");
+      }
     } catch (e) {
-      _showError("Authentication error. Try again.");
+      if (mounted) setState(() => _statusMessage = "Verification Error");
     } finally {
       if (mounted) setState(() => _isVerifying = false);
     }
   }
 
-  void _verifyPasskey() async {
-    if (!_formKey.currentState!.validate() || _isVerifying) return;
-    
+  // --- 3. Passkey Logic ---
+  Future<void> _verifyPasskey() async {
+    final input = _passkeyController.text.trim();
+    if (input.isEmpty) return;
+
     setState(() => _isVerifying = true);
-
-    final success = await _authRepo.verifyPasskey(_passkeyController.text);
+    
+    // Using verifyPasskey from AuthRepository
+    final success = await _authRepo.verifyPasskey(input);
+    
     if (success) {
-      _navigateToDashboard();
+      _unlockApp();
     } else {
-      _showError("Invalid Passkey");
-      setState(() => _isVerifying = false);
+      if (mounted) {
+        setState(() {
+          _statusMessage = "Incorrect Passkey";
+          _isVerifying = false;
+        });
+        _passkeyController.clear();
+      }
     }
   }
 
-  void _navigateToDashboard() {
-    Navigator.pushReplacementNamed(context, '/dashboard');
-  }
-
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.redAccent)
-    );
-  }
-
-  // --- UI Components ---
-
-  Widget _buildAuthBody() {
-    switch (_currentMode) {
-      case AuthMode.face:
-        return _buildFaceUI();
-      case AuthMode.passkey:
-        return _buildPasskeyUI();
-      default:
-        return _buildBiometricUI();
+  void _unlockApp() {
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, '/dashboard');
     }
-  }
-
-  Widget _buildBiometricUI() {
-    return Column(
-      children: [
-        const Icon(Icons.fingerprint, size: 100, color: BlockPayTheme.electricGreen),
-        const SizedBox(height: 24),
-        ElevatedButton(
-          onPressed: _triggerNativeAuth,
-          child: const Text("TAP SENSOR TO UNLOCK"),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFaceUI() {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return const CircularProgressIndicator(color: BlockPayTheme.electricGreen);
-    }
-    return Column(
-      children: [
-        Container(
-          width: 250,
-          height: 250,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: BlockPayTheme.electricGreen, width: 2),
-          ),
-          child: ClipOval(child: CameraPreview(_cameraController!)),
-        ),
-        const SizedBox(height: 32),
-        _isVerifying
-          ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
-          : ElevatedButton(
-              onPressed: _verifyFace,
-              style: ElevatedButton.styleFrom(minimumSize: const Size(200, 56)),
-              child: const Text("VERIFY IDENTITY"),
-            ),
-      ],
-    );
-  }
-
-  Widget _buildPasskeyUI() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Form(
-        key: _formKey, 
-        child: Column(
-          children: [
-            TextFormField(
-              controller: _passkeyController,
-              obscureText: true,
-              style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
-              textAlign: TextAlign.center,
-              decoration: const InputDecoration(
-                hintText: "••••••",
-                labelText: "Enter App Passkey",
-              ),
-              keyboardType: TextInputType.number,
-              validator: Validators.validatePasskey, 
-            ),
-            const SizedBox(height: 24),
-            _isVerifying
-              ? const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
-              : ElevatedButton(
-                  onPressed: _verifyPasskey,
-                  style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 56)),
-                  child: const Text("UNLOCK WALLET"),
-                ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -200,22 +155,45 @@ class _AppLockScreenState extends State<AppLockScreen> {
         child: Column(
           children: [
             const Spacer(),
-            const Icon(Icons.shield_outlined, size: 60, color: BlockPayTheme.electricGreen),
+            Icon(
+              _getIconForMode(_currentMode), 
+              size: 60, 
+              color: BlockPayTheme.electricGreen
+            ),
             const SizedBox(height: 16),
-            Text("Security Required", style: theme.textTheme.headlineMedium),
+            Text(
+              "Security Required", 
+              style: theme.textTheme.headlineMedium?.copyWith(color: Colors.white)
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _statusMessage,
+              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            ),
             const SizedBox(height: 40),
             
-            Expanded(flex: 3, child: Center(child: _buildAuthBody())),
+            // Dynamic Body based on Auth Mode
+            Expanded(
+              flex: 3, 
+              child: Center(child: _buildAuthBody())
+            ),
             
-            Padding(
-              padding: const EdgeInsets.only(bottom: 40),
+            // Mode Switcher Bottom Bar
+            Container(
+              margin: const EdgeInsets.only(bottom: 40),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(30)
+              ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _modeIconButton(Icons.fingerprint, AuthMode.biometric),
-                  const SizedBox(width: 30),
+                  const SizedBox(width: 20),
                   _modeIconButton(Icons.face, AuthMode.face),
-                  const SizedBox(width: 30),
+                  const SizedBox(width: 20),
                   _modeIconButton(Icons.password, AuthMode.passkey),
                 ],
               ),
@@ -226,16 +204,101 @@ class _AppLockScreenState extends State<AppLockScreen> {
     );
   }
 
+  IconData _getIconForMode(AuthMode mode) {
+    switch (mode) {
+      case AuthMode.biometric: return Icons.fingerprint;
+      case AuthMode.face: return Icons.face;
+      case AuthMode.passkey: return Icons.lock;
+    }
+  }
+
+  Widget _buildAuthBody() {
+    if (_currentMode == AuthMode.face) {
+      return Container(
+        width: 200,
+        height: 200,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: BlockPayTheme.electricGreen.withOpacity(0.5), width: 2),
+        ),
+        child: ClipOval(
+          child: _cameraController != null && _cameraController!.value.isInitialized
+              ? CameraPreview(_cameraController!)
+              : const Center(child: Icon(Icons.camera_alt, color: Colors.white24, size: 40)),
+        ),
+      );
+    } else if (_currentMode == AuthMode.passkey) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _passkeyController,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: "Enter Passkey",
+                hintStyle: const TextStyle(color: Colors.white30),
+                filled: true,
+                fillColor: Colors.white10,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                prefixIcon: const Icon(Icons.key, color: BlockPayTheme.electricGreen),
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _isVerifying ? null : _verifyPasskey,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: BlockPayTheme.electricGreen,
+                foregroundColor: Colors.black,
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: _isVerifying 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
+                  : const Text("Unlock"),
+            )
+          ],
+        ),
+      );
+    } else {
+      // Biometric Placeholder
+      return GestureDetector(
+        onTap: _triggerNativeAuth,
+        child: Container(
+          width: 120,
+          height: 120,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: BlockPayTheme.electricGreen.withOpacity(0.1),
+          ),
+          child: const Icon(Icons.fingerprint, size: 60, color: BlockPayTheme.electricGreen),
+        ),
+      );
+    }
+  }
+
   Widget _modeIconButton(IconData icon, AuthMode mode) {
     bool isActive = _currentMode == mode;
     return IconButton(
-      icon: Icon(icon, size: 32),
+      icon: Icon(icon, size: 28),
       color: isActive ? BlockPayTheme.electricGreen : BlockPayTheme.subtleGrey,
       onPressed: () {
+        // Dispose camera if leaving face mode
+        if (_currentMode == AuthMode.face && mode != AuthMode.face) {
+          _cameraController?.dispose();
+          _cameraController = null;
+        }
+        
         if (mode == AuthMode.face) {
           _initFaceAuth();
+        } else if (mode == AuthMode.biometric) {
+          _triggerNativeAuth();
         } else {
-          setState(() => _currentMode = mode);
+          setState(() {
+             _currentMode = mode;
+             _statusMessage = "Enter your passkey";
+          });
         }
       },
     );
