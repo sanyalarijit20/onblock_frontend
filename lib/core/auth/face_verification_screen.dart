@@ -19,13 +19,11 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   bool _isDetecting = false;
   String _statusMessage = "Blink to confirm payment";
   
-  // Liveness Tracking
-  bool _eyesClosedPreviously = false;
-
   @override
   void initState() {
     super.initState();
     _initializeCamera();
+    _faceService.resetLivenessState();
   }
 
   Future<void> _initializeCamera() async {
@@ -71,7 +69,6 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
           _validateLiveness(face);
         } else {
           // Reset state if face lost
-          _eyesClosedPreviously = false;
           if (mounted) setState(() => _statusMessage = "Align face within frame");
         }
       } catch (e) {
@@ -85,16 +82,12 @@ class _FaceVerificationSheetState extends State<FaceVerificationSheet> {
   void _validateLiveness(Face face) {
     if(!mounted) return;
 
-    bool isClosed = _faceService.areEyesClosed(face);
-
-    if (isClosed) {
-      _eyesClosedPreviously = true;
-      setState(() => _statusMessage = "Processing... Open Eyes");
+    // Check if liveness is confirmed (blink detected)
+    if (_faceService.checkLiveness(face)) {
+      _confirmVerification();
     } else {
-      // Eyes are open now. Were they closed before?
-      if (_faceService.checkForBlink(face, _eyesClosedPreviously)) {
-        _confirmVerification();
-      }
+      final blinkCount = _faceService.getBlinkCount();
+      setState(() => _statusMessage = "Blink detected: $blinkCount/1");
     }
   }
 

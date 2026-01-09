@@ -7,6 +7,7 @@ import 'features/auth/face_enrol_screen.dart';
 import 'features/auth/security_setup_screen.dart';
 import 'features/auth/wallet_setup_screen.dart';
 import 'features/profile/dashboard_screen.dart'; 
+import 'features/payment/scan_qr_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -60,7 +61,8 @@ class OnBlockApp extends StatelessWidget {
         '/face-enrollment': (context) => const FaceEnrollmentScreen(),
         '/security-setup': (context) => const SecuritySetupScreen(),
         '/wallet-setup': (context) => const WalletSetupScreen(),
-        '/dashboard': (context) => const DashboardScreen(), 
+        '/dashboard': (context) => const DashboardScreen(),
+        '/scan': (context) => const ScannerScreen(),
       },
     );
   }

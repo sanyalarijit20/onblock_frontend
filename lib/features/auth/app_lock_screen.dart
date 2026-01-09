@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'dart:convert';
-import 'dart:io';
 import '../../core/auth/biometric_service.dart';
 import '../../core/auth/auth_repository.dart';
 import '/theme/app_theme.dart';

@@ -2,9 +2,16 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:ui';
+import 'dart:math' as math;
 
 class FaceDetectionService {
   late FaceDetector _faceDetector;
+  
+  // Liveness detection tracking
+  bool _eyesWerePreviouslyClosed = false;
+  int _blinkCount = 0;
+  DateTime? _lastBlinkTime;
+  double? _previousHeadTurnX;
 
   FaceDetectionService() {
     _faceDetector = FaceDetector(
@@ -44,36 +51,100 @@ class FaceDetectionService {
     return await _faceDetector.processImage(inputImage);
   }
 
-  /// Determines if the user has performed a "Blink" based on probability history.
-  /// Returns true if a blink is completed (Eyes Open -> Closed -> Open).
-  bool checkForBlink(Face face, bool eyesWerePreviouslyClosed) {
+  /// Checks if eyes are currently closed based on probability thresholds.
+  bool _areEyesClosed(Face face) {
     final double? leftEye = face.leftEyeOpenProbability;
     final double? rightEye = face.rightEyeOpenProbability;
-
+    
     if (leftEye == null || rightEye == null) return false;
-
-    // Thresholds
-    const double openThreshold = 0.85;
+    
+    // Both eyes must have low probability to be considered closed
     const double closedThreshold = 0.15;
+    return (leftEye < closedThreshold) && (rightEye < closedThreshold);
+  }
 
-    bool areEyesClosed = (leftEye < closedThreshold) && (rightEye < closedThreshold);
-    bool areEyesOpen = (leftEye > openThreshold) && (rightEye > openThreshold);
+  /// Checks if eyes are currently open based on probability thresholds.
+  bool _areEyesOpen(Face face) {
+    final double? leftEye = face.leftEyeOpenProbability;
+    final double? rightEye = face.rightEyeOpenProbability;
+    
+    if (leftEye == null || rightEye == null) return false;
+    
+    // Both eyes must have high probability to be considered open
+    const double openThreshold = 0.85;
+    return (leftEye > openThreshold) && (rightEye > openThreshold);
+  }
 
-    // State Machine logic handled by caller usually, but helper here:
-    // If eyes are now OPEN, but were previously CLOSED, that's a blink complete.
-    if (areEyesOpen && eyesWerePreviouslyClosed) {
+  bool _detectBlink(Face face) {
+    final bool currentlyClosed = _areEyesClosed(face);
+    final bool currentlyOpen = _areEyesOpen(face);
+
+    // Transition detected: Eyes were closed, now they're open = blink completed
+    if (_eyesWerePreviouslyClosed && currentlyOpen) {
+      _eyesWerePreviouslyClosed = false;
+      _lastBlinkTime = DateTime.now();
       return true;
     }
-    
+
+    // Update state: Track if eyes are currently closed
+    if (currentlyClosed) {
+      _eyesWerePreviouslyClosed = true;
+    } else if (currentlyOpen) {
+      _eyesWerePreviouslyClosed = false;
+    }
+
     return false;
   }
-  
-  // Helper to update state
-  bool areEyesClosed(Face face) {
-     final double? leftEye = face.leftEyeOpenProbability;
-    final double? rightEye = face.rightEyeOpenProbability;
-    if (leftEye == null || rightEye == null) return false;
-    return (leftEye < 0.15) && (rightEye < 0.15);
+
+  /// Detects head movement (yaw angle) for liveness.
+  /// Returns true if significant head turn is detected (left/right movement).
+  bool _detectHeadTurn(Face face) {
+    final double? headTurnX = face.headEulerAngleY; // Yaw (left/right turn)
+    
+    if (headTurnX == null) return false;
+
+    // Initialize on first detection
+    if (_previousHeadTurnX == null) {
+      _previousHeadTurnX = headTurnX;
+      return false;
+    }
+
+    // Detect if head has turned significantly (threshold in degrees)
+    const double turnThreshold = 15.0; // 15 degree turn threshold
+    final double headMovement = (headTurnX - (_previousHeadTurnX ?? 0)).abs();
+
+    _previousHeadTurnX = headTurnX;
+
+    return headMovement > turnThreshold;
+  }
+
+  bool checkLiveness(Face face) {
+    // Must detect a blink as primary liveness indicator
+    final bool blinkDetected = _detectBlink(face);
+    
+    if (blinkDetected) {
+      _blinkCount++;
+    }
+
+ 
+    final bool headMovementDetected = _detectHeadTurn(face);
+    return _blinkCount >= 1;
+  }
+
+  /// Get current blink count for UI feedback.
+  int getBlinkCount() => _blinkCount;
+
+  /// Reset liveness detection state (call this at the start of a new liveness check).
+  void resetLivenessState() {
+    _eyesWerePreviouslyClosed = false;
+    _blinkCount = 0;
+    _lastBlinkTime = null;
+    _previousHeadTurnX = null;
+  }
+  bool hasRecentBlink(int seconds) {
+    if (_lastBlinkTime == null) return false;
+    final difference = DateTime.now().difference(_lastBlinkTime!);
+    return difference.inSeconds < seconds;
   }
 
   void dispose() {
