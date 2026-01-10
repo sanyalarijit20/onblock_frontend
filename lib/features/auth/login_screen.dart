@@ -18,109 +18,84 @@ class _LoginScreenState extends State<LoginScreen> {
   final AuthRepository _authRepo = AuthRepository();
   final SecureStorage _storage = SecureStorage();
   bool _isLoading = false;
-  String _statusText = "Welcome Back";
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _attemptFingerprint();
-    });
-  }
-
-  /// 1. Fingerprint / Device Secure Lock (Default)
-  Future<void> _attemptFingerprint() async {
-    if (_isLoading) return;
-    
-    setState(() => _statusText = "Authenticating...");
-    
+  /// Handles Login Success. 
+  /// [isHardwareUnlock] allows bypassing the JWT check for client-side demo purposes.
+  Future<void> _handleLoginSuccess({bool isHardwareUnlock = false}) async {
     final hasWallet = await _storage.hasWallet();
-    
+    final token = await _storage.getJwt();
+
     if (!hasWallet) {
-       if(mounted) setState(() => _statusText = "No wallet found. Please Register.");
-       return;
+      _showError("Identity missing on this device. Please Register.");
+      return;
     }
 
-    final authenticated = await _biometricService.authenticateForEntry();
+    // If it's a passkey login, we MUST have a token.
+    // If it's hardware, we allow entry to show the "Identity-Only" dashboard state.
+    if (!isHardwareUnlock && token == null) {
+      _showError("Session expired. Please use your Passkey.");
+      return;
+    }
 
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
+      (route) => false,
+    );
+  }
+
+  Future<void> _loginWithBiometrics() async {
+    final hasIdentity = await _storage.hasWallet();
+    if (!hasIdentity) {
+      _showError("No account detected. Please register first.");
+      return;
+    }
+
+    // Client-side hardware verification
+    final authenticated = await _biometricService.authenticateForEntry();
     if (authenticated) {
-      _onLoginSuccess();
-    } else {
-      if(mounted) setState(() => _statusText = "Authentication Cancelled");
+      // hardware unlock = true: enters dashboard immediately
+      await _handleLoginSuccess(isHardwareUnlock: true);
     }
   }
 
-  /// 2. Face Verification (Purely Client-Side Liveness now)
-  Future<void> _attemptFaceVerification() async {
-    // Open the Camera Sheet which performs Local Liveness Check
+  Future<void> _loginWithFaceID() async {
     final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => const FaceVerificationSheet(),
     );
-
-    // Only proceed if the sheet confirms 'verified' (Liveness passed)
+    
     if (result != null && result['verified'] == true) {
-      setState(() {
-        _isLoading = true;
-        _statusText = "Identity Verified...";
-      });
-
-      // No backend call needed for verification since dlib is offline.
-      // We trust the local liveness check for now.
-      
-      await Future.delayed(const Duration(milliseconds: 500)); 
-      
-      _onLoginSuccess();
-      
-      if(mounted) setState(() => _isLoading = false);
+      // hardware unlock = true
+      await _handleLoginSuccess(isHardwareUnlock: true);
     }
   }
 
-  /// 3. App Passkey (Custom Input + Backend Verify)
-  Future<void> _attemptPasskey() async {
-    final passkey = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => const _PasskeyInputSheet(),
-    );
-
+  Future<void> _loginWithPasskey() async {
+    final passkey = await _showPasskeyDialog();
     if (passkey != null && passkey.isNotEmpty) {
-      setState(() {
-        _isLoading = true;
-        _statusText = "Verifying Passkey...";
-      });
-
+      if (mounted) setState(() => _isLoading = true);
       try {
-        final isValid = await _authRepo.verifyPasskey(passkey);
-        
-        if (isValid) {
-          _onLoginSuccess();
+        // Backend verification to restore full session (JWT)
+        final success = await _authRepo.verifyPasskey(passkey);
+        if (success) {
+          await _handleLoginSuccess(isHardwareUnlock: false);
         } else {
-          _showError("Invalid Passkey");
+          _showError("Incorrect Passkey. Access Denied.");
         }
       } catch (e) {
-        _showError("Network error checking passkey");
+        _showError("Connection failed. Try again.");
       } finally {
-        if(mounted) setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
       }
     }
   }
 
-  void _onLoginSuccess() {
-    if(!mounted) return;
-    setState(() => _statusText = "Success!");
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const DashboardScreen()),
-    );
-  }
-
   void _showError(String message) {
-    if(!mounted) return;
-    setState(() => _statusText = message);
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
     );
@@ -130,86 +105,83 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: BlockPayTheme.obsidianBlack,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(32.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BlockPayTheme.electricGreen.withOpacity(0.1),
-                  border: Border.all(color: BlockPayTheme.electricGreen, width: 2),
-                ),
-                child: const Icon(Icons.lock_outline_rounded, size: 64, color: BlockPayTheme.electricGreen),
-              ),
-              const SizedBox(height: 32),
-              Text(
-                "BlockPay",
-                style: BlockPayTheme.darkTheme.textTheme.displayLarge,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _statusText,
-                style: const TextStyle(color: BlockPayTheme.subtleGrey, fontSize: 16),
-              ),
-              const Spacer(),
-              if (_isLoading)
-                const CircularProgressIndicator(color: BlockPayTheme.electricGreen)
-              else
-                Column(
-                  children: [
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _attemptFingerprint,
-                        icon: const Icon(Icons.fingerprint, size: 28),
-                        label: const Text("Unlock with Fingerprint"),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _AlternativeAuthButton(
-                          icon: Icons.face_rounded,
-                          label: "Face ID",
-                          onTap: _attemptFaceVerification,
-                        ),
-                        _AlternativeAuthButton(
-                          icon: Icons.dialpad_rounded,
-                          label: "Passkey",
-                          onTap: _attemptPasskey,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 24),
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Auth Hub", style: BlockPayTheme.darkTheme.textTheme.displaySmall),
+            const SizedBox(height: 8),
+            const Text("Unlock your identity with device security", style: TextStyle(color: BlockPayTheme.subtleGrey)),
+            const SizedBox(height: 48),
+            
+            _AuthOptionTile(
+              icon: Icons.fingerprint,
+              title: "Biometric Unlock",
+              subtitle: "Hardware-level security",
+              onTap: _loginWithBiometrics,
+            ),
+            const SizedBox(height: 16),
+            _AuthOptionTile(
+              icon: Icons.face_retouching_natural,
+              title: "Facial Recognition",
+              subtitle: "Client-side identity check",
+              onTap: _loginWithFaceID,
+            ),
+            const SizedBox(height: 16),
+            _AuthOptionTile(
+              icon: Icons.keyboard_alt_outlined,
+              title: "App Passkey",
+              subtitle: "Full session sync with backend",
+              onTap: _loginWithPasskey,
+            ),
+            
+            if (_isLoading) ...[
+              const SizedBox(height: 40),
+              const Center(child: CircularProgressIndicator(color: BlockPayTheme.electricGreen)),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
+
+  Future<String?> _showPasskeyDialog() {
+    return showDialog<String>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          backgroundColor: BlockPayTheme.surfaceGrey,
+          title: const Text("Verify Passkey", style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            obscureText: true,
+            style: const TextStyle(color: Colors.white, letterSpacing: 4),
+            keyboardType: TextInputType.visiblePassword,
+            decoration: const InputDecoration(hintText: "••••••"),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("CANCEL")),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text("VERIFY"),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
-class _AlternativeAuthButton extends StatelessWidget {
+class _AuthOptionTile extends StatelessWidget {
   final IconData icon;
-  final String label;
+  final String title;
+  final String subtitle;
   final VoidCallback onTap;
 
-  const _AlternativeAuthButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
+  const _AuthOptionTile({required this.icon, required this.title, required this.subtitle, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -217,119 +189,30 @@ class _AlternativeAuthButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        width: 120,
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: BlockPayTheme.surfaceGrey,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: Colors.white.withOpacity(0.05)),
         ),
-        child: Column(
+        child: Row(
           children: [
-            Icon(icon, color: Colors.white, size: 24),
-            const SizedBox(height: 8),
-            Text(label, style: const TextStyle(color: BlockPayTheme.subtleGrey, fontSize: 12)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PasskeyInputSheet extends StatefulWidget {
-  const _PasskeyInputSheet();
-
-  @override
-  State<_PasskeyInputSheet> createState() => _PasskeyInputSheetState();
-}
-
-class _PasskeyInputSheetState extends State<_PasskeyInputSheet> {
-  final TextEditingController _passController = TextEditingController();
-  bool _isObscured = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: BlockPayTheme.surfaceGrey,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: BlockPayTheme.subtleGrey,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: BlockPayTheme.electricGreen.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: BlockPayTheme.electricGreen),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  Text(subtitle, style: const TextStyle(color: BlockPayTheme.subtleGrey, fontSize: 12)),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
-            Text(
-              "Enter App Passkey",
-              style: BlockPayTheme.darkTheme.textTheme.headlineMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _passController,
-              obscureText: _isObscured,
-              keyboardType: TextInputType.visiblePassword,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 2),
-              decoration: InputDecoration(
-                filled: true,
-                fillColor: Colors.black26,
-                hintText: "••••••",
-                hintStyle: const TextStyle(color: Colors.white24),
-                prefixIcon: const Icon(Icons.lock_outline, color: BlockPayTheme.electricGreen),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _isObscured ? Icons.visibility : Icons.visibility_off,
-                    color: BlockPayTheme.subtleGrey,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      _isObscured = !_isObscured;
-                    });
-                  },
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: BlockPayTheme.electricGreen),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                final pass = _passController.text.trim();
-                if (pass.isNotEmpty) {
-                  Navigator.pop(context, pass);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: BlockPayTheme.electricGreen,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text("Unlock"),
-            ),
-            const SizedBox(height: 16),
+            const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 16),
           ],
         ),
       ),

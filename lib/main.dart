@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/auth/secure_storage.dart';
 import 'features/auth/app_lock_screen.dart';
+import 'features/auth/login_screen.dart';
 import 'features/auth/registration_screen.dart';
 import 'features/auth/face_enrol_screen.dart'; 
 import 'features/auth/security_setup_screen.dart';
@@ -11,26 +12,26 @@ import 'features/payment/scan_qr_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
-  // Ensuring the Flutter engine is ready for Fedora/Android platform channels
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Set preferred orientations for consistent Biometric scanning UI
+  // Set preferred orientations for consistent Biometric scanning UI on the HP EliteBook
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
 
   final storage = SecureStorage();
   
-  // Checking local device state to determine entry point for the "Invisible Rail"
-  final bool hasWallet = await storage.hasWallet(); // Smart Account address exists
-  final bool hasToken = await storage.hasToken();   // JWT exists
+  // Checking local device state
+  final bool hasWallet = await storage.hasWallet(); 
+  final bool hasToken = await storage.hasToken();   
 
-  String initialRoute = '/register';
+  // Navigation Logic based on the "Invisible Rail" state:
+  // Default to the Launch Pad (App Lock Screen) as requested
+  String initialRoute = '/lock';
   
-  if (hasWallet && hasToken) {
-    initialRoute = '/lock';
-  } else if (hasToken && !hasWallet) {
-    // If they have a session but setup was interrupted, send back to biometrics
+  // If the user has a session but didn't finish the hardware setup, 
+  // we resume the sequence automatically.
+  if (hasToken && !hasWallet) {
     initialRoute = '/face-enrollment';
   }
 
@@ -46,21 +47,27 @@ class OnBlockApp extends StatelessWidget {
     return MaterialApp(
       title: 'OnBlock',
       debugShowCheckedModeBanner: false,
-      
-      // Applying the custom Obsidian & Electric Green theme for the MVP
       themeMode: ThemeMode.dark,
-      theme: BlockPayTheme.darkTheme, // Fallback if system is light
+      theme: BlockPayTheme.darkTheme,
       darkTheme: BlockPayTheme.darkTheme,
       
       initialRoute: initialRoute,
       
-      // Standardized routes for the CSE project demo
+      // Standardized routes reflecting the recent screen changes
       routes: {
+        // The Launch Pad (Landing Page)
         '/lock': (context) => const AppLockScreen(),
+        
+        // The Auth Hub (Login)
+        '/login': (context) => const LoginScreen(),
+        
+        // The Registration Flow
         '/register': (context) => const RegistrationScreen(),
         '/face-enrollment': (context) => const FaceEnrollmentScreen(),
         '/security-setup': (context) => const SecuritySetupScreen(),
         '/wallet-setup': (context) => const WalletSetupScreen(),
+        
+        // Core App Experience
         '/dashboard': (context) => const DashboardScreen(),
         '/scan': (context) => const ScannerScreen(),
       },

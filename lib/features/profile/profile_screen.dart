@@ -377,7 +377,7 @@ class ProfileScreen extends StatelessWidget {
                 const Icon(Icons.check_circle, size: 16, color: BlockPayTheme.electricGreen),
                 const SizedBox(width: 8),
                 Text(
-                  "Standard Polygon Network",
+                  "Sepolia Network",
                   style: TextStyle(color: BlockPayTheme.electricGreen.withOpacity(0.8), fontSize: 13, fontWeight: FontWeight.bold),
                 ),
               ],
