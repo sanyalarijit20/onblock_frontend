@@ -101,7 +101,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   children: [
                     const Icon(Icons.account_balance_wallet_outlined, color: BlockPayTheme.electricGreen, size: 48),
                     const SizedBox(height: 16),
-                    Text("Join OnBlock", style: theme.textTheme.headlineMedium),
+                    Text("Join BlockPay", style: theme.textTheme.headlineMedium),
                     const SizedBox(height: 32),
                     
                     Row(

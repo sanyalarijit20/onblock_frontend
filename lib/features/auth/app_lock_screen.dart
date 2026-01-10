@@ -42,7 +42,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
                     child: Icon(Icons.security_rounded, size: 80, color: BlockPayTheme.electricGreen),
                   ),
                   const SizedBox(height: 24),
-                  Text("ONBLOCK", style: BlockPayTheme.darkTheme.textTheme.displayLarge),
+                  Text("BlockPay", style: BlockPayTheme.darkTheme.textTheme.displayLarge),
                   const SizedBox(height: 12),
                   const Text(
                     "Secure, Invisible, Decentralized",
